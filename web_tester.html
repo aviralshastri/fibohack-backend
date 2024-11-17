@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Article Upload</title>
+    <style>
+        .error {
+            color: #dc3545;
+            margin-top: 10px;
+            text-align: center;
+        }
+        .success {
+            color: #28a745;
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Upload Article</h2>
+        <form id="uploadForm">
+            <label for="title">Title:</label>
+            <input type="text" id="title" name="title" required>
+
+            <label for="description">Description:</label>
+            <input type="text" id="description" name="description" required>
+
+            <label for="author">Author:</label>
+            <input type="text" id="author" name="author" required>
+
+            <label for="thumbnail">Thumbnail:</label>
+            <input type="file" id="thumbnail" name="thumbnail" accept="image" required>
+
+            <label for="banner">Banner:</label>
+            <input type="file" id="banner" name="banner" accept="video" required>
+
+            <label for="markdown">Markdown:</label>
+            <input type="file" id="markdown" name="markdown" accept=".md" required>
+
+            <button type="submit">Upload Article</button>
+        </form>
+
+        <div id="status"></div>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const status = document.getElementById('status');
+            status.textContent = 'Uploading...';
+            status.className = '';
+            
+            const formData = new FormData();
+            
+            const textData = {
+                title: document.getElementById('title').value,
+                description: document.getElementById('description').value,
+                author: document.getElementById('author').value
+            };
+            
+            formData.append('text_data', JSON.stringify(textData));
+            
+            formData.append('thumbnail', document.getElementById('thumbnail').files[0]);
+            formData.append('video', document.getElementById('banner').files[0]);
+            formData.append('markdown', document.getElementById('markdown').files[0]);
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/upload-post/tutorials', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    status.textContent = 'Article uploaded successfully!';
+                    status.className = 'success';
+                    event.target.reset();
+                } else {
+                    status.textContent = 'Error: ' + (result.detail || 'Unknown error');
+                    status.className = 'error';
+                }
+            } catch (error) {
+                status.textContent = 'Error: ' + error.message;
+                status.className = 'error';
+            }
+        });
+    </script>
+</body>
+</html>
