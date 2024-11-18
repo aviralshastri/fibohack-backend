@@ -1,10 +1,15 @@
-from functions import generate_unique_filename, generate_unique_folder, add_new_post_mysql, create_folder,update_post_mysql,delete_post
+from functions import generate_unique_filename, generate_unique_folder, add_new_post_mysql,get_thumbnail, update_post_mysql,delete_post_mysql,get_post_mysql
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+import mimetypes
 from typing import Dict, Optional
 import os
 import json
 import logging
+import shutil
+import base64
 
 
 logging.basicConfig(level=logging.INFO)
@@ -97,13 +102,13 @@ async def upload_post(
         os.makedirs(post_folder_path, exist_ok=True)
         logger.info(f"Created post folder: {post_folder_path}")
 
-        thumbnail_id = generate_unique_filename(thumbnails_dir, thumbnail.filename)
+        thumbnail_id = generate_unique_filename(thumbnails_dir)
         thumbnail_path = os.path.join(thumbnails_dir, thumbnail_id)
         logger.info(f"Saving thumbnail to: {thumbnail_path}")
         
         try:
             thumbnail_content = await thumbnail.read()
-            with open(thumbnail_path, "wb") as f:
+            with open(thumbnail_path+"."+thumbnail.filename.split(".")[1], "wb") as f:
                 f.write(thumbnail_content)
             logger.info(f"Thumbnail saved successfully: {len(thumbnail_content)} bytes")
         except Exception as e:
@@ -191,28 +196,260 @@ async def update_post(
 ):
     print(f"Post type received: {post_type}")
     
-    if field not in ["banner", "thumbnail", "video", "markdown"]:
+    if field not in ["banner", "thumbnails", "video", "markdown"]:
         if value is None:
             raise HTTPException(status_code=400, detail="Value is required for non-file fields")
         update_post_mysql(post_id=post_id, post_type=post_type, key=field, value=value)
         return {"message": f"Updated {field} successfully"}
     
-    # Handle file uploads
-    file_mapping = {
-        "thumbnail": thumbnail,
-        "banner": banner,
-        "markdown": markdown,
-        "video": video
-    }
-    
-    uploaded_file = file_mapping.get(field)
-    if uploaded_file is None:
-        raise HTTPException(status_code=400, detail=f"No {field} file provided")
+    elif banner or thumbnail or markdown or video :
+        base_dir = os.path.abspath(os.path.join(os.getcwd(), "uploads"))
         
-    # Process the file
+        if field == "thumbnails" and thumbnail:
+            thumbnail_filename = get_thumbnail(post_id=post_id, post_type=post_type)
+            if not thumbnail_filename:
+                raise HTTPException(status_code=404, detail="Existing thumbnail not found in database")
+            
+            thumbnails_dir = os.path.join(base_dir, "thumbnails")
+            os.makedirs(thumbnails_dir, exist_ok=True)
+
+            new_ext = os.path.splitext(thumbnail.filename)[1]
+            if not new_ext:
+                content_type = thumbnail.content_type
+                ext = mimetypes.guess_extension(content_type)
+                new_ext = ext if ext else '.unknown'
+            
+            new_filename = f"{thumbnail_filename}{new_ext}"
+            new_file_path = os.path.join(thumbnails_dir, new_filename)
+            
+            try:
+                for file in os.listdir(thumbnails_dir):
+                    if file.startswith(f"{thumbnail_filename}."):
+                        os.remove(os.path.join(thumbnails_dir, file))
+                
+                with open(new_file_path, "wb") as buffer:
+                    shutil.copyfileobj(thumbnail.file, buffer)
+                
+                update_post_mysql(
+                    post_id=post_id,
+                    post_type=post_type,
+                )
+                
+                return {
+                    "message": "Thumbnail updated successfully",
+                    "filename": new_filename
+                }
+                
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error updating thumbnail: {str(e)}"
+                )
+                
+        elif field == "banner" and banner:
+            banner_dir = os.path.join(base_dir, post_type, post_id)
+            os.makedirs(banner_dir, exist_ok=True)
+            
+            try:
+                new_ext = os.path.splitext(banner.filename)[1]
+                if not new_ext:
+                    content_type = banner.content_type
+                    ext = mimetypes.guess_extension(content_type)
+                    new_ext = ext if ext else '.unknown'
+                
+                for file in os.listdir(banner_dir):
+                    if file.startswith("banner."):
+                        os.remove(os.path.join(banner_dir, file))
+                
+                new_filename = f"banner{new_ext}"
+                new_file_path = os.path.join(banner_dir, new_filename)
+                
+                with open(new_file_path, "wb") as buffer:
+                    shutil.copyfileobj(banner.file, buffer)
+                
+                update_post_mysql(
+                    post_id=post_id,
+                    post_type=post_type,
+                )
+                
+                return {
+                    "message": "Banner updated successfully",
+                    "filename": new_filename
+                }
+                
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error updating banner: {str(e)}"
+                )
+                
+        elif field == "video" and video:
+            video_dir = os.path.join(base_dir, post_type, post_id)
+            os.makedirs(video_dir, exist_ok=True)
+            
+            try:
+                new_ext = os.path.splitext(video.filename)[1]
+                if not new_ext:
+                    content_type = video.content_type
+                    ext = mimetypes.guess_extension(content_type)
+                    new_ext = ext if ext else '.unknown'
+                
+                for file in os.listdir(video_dir):
+                    if file.startswith("video."):
+                        os.remove(os.path.join(video_dir, file))
+                
+                new_filename = f"video{new_ext}"
+                new_file_path = os.path.join(video_dir, new_filename)
+                
+                with open(new_file_path, "wb") as buffer:
+                    shutil.copyfileobj(video.file, buffer)
+                
+                update_post_mysql(
+                    post_id=post_id,
+                    post_type=post_type,
+                )
+                
+                return {
+                    "message": "Video updated successfully",
+                    "filename": new_filename
+                }
+                
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error updating video: {str(e)}"
+                )
+                
+        elif field == "markdown" and markdown:
+            markdown_dir = os.path.join(base_dir, post_type, post_id)
+            os.makedirs(markdown_dir, exist_ok=True)
+            
+            try:
+                new_ext = os.path.splitext(markdown.filename)[1]
+                if not new_ext:
+                    content_type = markdown.content_type
+                    ext = mimetypes.guess_extension(content_type)
+                    new_ext = ext if ext else '.md'
+                
+                for file in os.listdir(markdown_dir):
+                    if file.startswith("markdown."):
+                        os.remove(os.path.join(markdown_dir, file))
+
+                new_filename = f"markdown{new_ext}"
+                new_file_path = os.path.join(markdown_dir, new_filename)
+                
+                with open(new_file_path, "wb") as buffer:
+                    shutil.copyfileobj(markdown.file, buffer)
+                    
+                update_post_mysql(
+                    post_id=post_id,
+                    post_type=post_type,
+                )
+                
+                return {
+                    "message": "Markdown updated successfully",
+                    "filename": new_filename
+                }
+                
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error updating markdown: {str(e)}"
+                )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid field or missing file")
+        
+    else:
+        raise HTTPException(status_code=400, detail=f"No {field} file provided")
+
+
+@app.delete("/delete-post/{post_type}/{post_id}")
+async def delete_post(
+    post_id: str,
+    post_type: str
+):
+    if not post_id:
+        return {"error": "Post ID is required"}
+    if not post_type:
+        return {"error": "Post type is required"}
+    
     try:
-        # Here you would add your file processing logic
-        print(f"{field.capitalize()} received")
-        return {"message": f"{field.capitalize()} received", "post_type": post_type}
+        base_dir = os.path.abspath(os.path.join(os.getcwd(), "uploads"))
+        main_dir = os.path.join(base_dir, post_type)
+        thumbnail_id = get_thumbnail(post_id=post_id, post_type=post_type)
+        if thumbnail_id:
+            thumbnail_dir = os.path.join(base_dir, "thumbnails")
+            for file in os.listdir(thumbnail_dir):
+                if os.path.splitext(file)[0] == thumbnail_id:
+                    file_path = os.path.join(thumbnail_dir, file)
+                    os.remove(file_path)
+                    print(f"Deleted thumbnail file: {file_path}")
+                    break
+        post_dir = os.path.join(main_dir, post_id)
+        if os.path.exists(post_dir) and os.path.isdir(post_dir):
+            shutil.rmtree(post_dir)
+            print(f"Deleted folder: {post_dir}")
+        
+        delete_post_mysql(post_id=post_id,thumbnail_id=thumbnail_id,post_type=post_type)
+        
+        return {"status": "Success", "message": "Post and related resources deleted"}
+    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing {field}: {str(e)}")
+        print(f"Error: {e}")
+        return {"status": "Error", "message": str(e)}
+    
+
+@app.get("/get-posts/{post_type}")
+async def get_posts(post_type: str, offset_upper: int, offset_lower: int):
+    def remove_key_from_dict_list(dict_list, key_to_remove):
+        return [{key: value for key, value in d.items() if key != key_to_remove} for d in dict_list]
+    
+    data = get_post_mysql(post_type=post_type, offset_lower=offset_lower, offset_upper=offset_upper)
+    
+    base_dir = os.path.abspath(os.path.join(os.getcwd(), "uploads"))
+    thumbnail_dir = os.path.join(base_dir, "thumbnails")
+    
+    column_names = ['id', 'description', 'title', 'thumbnail', 'author', 'created_at', 'updated_at']
+    
+    structured_data = []
+    for row in data:
+        post_dict = {column_names[i]: row[i] for i in range(len(column_names))}
+        
+        post_dict['thumbnail_file'] = None
+        if post_dict['thumbnail']:
+            thumbnail_prefix = post_dict['thumbnail']
+            thumbnail_files = os.listdir(thumbnail_dir)
+            matching_file = next(
+                (f for f in thumbnail_files if f.startswith(thumbnail_prefix)),
+                None
+            )
+            if matching_file:
+                # Read and encode the thumbnail file
+                file_path = os.path.join(thumbnail_dir, matching_file)
+                try:
+                    with open(file_path, 'rb') as file:
+                        file_content = file.read()
+                        # Convert binary data to base64 string
+                        base64_encoded = base64.b64encode(file_content).decode('utf-8')
+                        # Add file type information for proper frontend handling
+                        file_extension = os.path.splitext(matching_file)[1].lower()
+                        mime_type = {
+                            '.jpg': 'image/jpeg',
+                            '.jpeg': 'image/jpeg',
+                            '.png': 'image/png',
+                            '.gif': 'image/gif'
+                        }.get(file_extension, 'application/octet-stream')
+                        
+                        post_dict['thumbnail_file'] = {
+                            'data': base64_encoded,
+                            'mime_type': mime_type,
+                            'filename': matching_file
+                        }
+                except Exception as e:
+                    print(f"Error reading thumbnail file: {e}")
+                    post_dict['thumbnail_file'] = None
+        
+        structured_data.append(post_dict)
+    
+    structured_data = remove_key_from_dict_list(structured_data, "thumbnail")
+    return structured_data

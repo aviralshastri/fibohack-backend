@@ -4,6 +4,7 @@ import string
 import firebase_admin
 from firebase_admin import credentials, firestore
 import mysql.connector
+from mysql.connector import Error
 from datetime import datetime
 
 def get_db_connection():
@@ -15,20 +16,15 @@ def get_db_connection():
     )
 
 
-def generate_unique_filename(path, filename):
-    _, ext = os.path.splitext(filename)
-    
+def generate_unique_filename(path):
     def generate_random_name():
         return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-
     random_name = generate_random_name()
-    unique_filename = os.path.join(path, random_name + ext)
-    
-    while os.path.exists(unique_filename):
+    existing_basenames = {os.path.splitext(f)[0] for f in os.listdir(path)}
+    while random_name in existing_basenames:
         random_name = generate_random_name()
-        unique_filename = os.path.join(path, random_name + ext)
-    
-    return random_name+f"{ext}"
+    return random_name
+
 
 def generate_unique_folder(path):
     def generate_random_name():
@@ -156,7 +152,8 @@ def update_post_mysql(post_type, post_id, key=None, value=None):
         cursor.close()
         connection.close()
 
-def delete_post(post_type, id):
+
+def delete_post_mysql(post_type, id,thumbnail_id):
     """
     Delete a post from the database.
     
@@ -172,10 +169,10 @@ def delete_post(post_type, id):
     try:
         query = f"""
         DELETE FROM {post_type}
-        WHERE id = %s
+        WHERE id = %s and thumbnail = %s
         """
         
-        cursor.execute(query, (id,))
+        cursor.execute(query, (id,thumbnail_id,))
         connection.commit()
         
         if cursor.rowcount > 0:
@@ -188,6 +185,94 @@ def delete_post(post_type, id):
     except mysql.connector.Error as err:
         print(f"Error deleting post: {err}")
         return False
+    finally:
+        cursor.close()
+        connection.close()
+
+def get_thumbnail(post_id: str, post_type: str):
+    """
+    Get thumbnail from a post from the database.
+    
+    Parameters:
+    - post_type: str 
+    - post_id: str (the unique identifier of the post)
+    
+    Returns:
+    - Optional[str]: thumbnail file name if found, None if not found or error occurs
+    
+    Raises:
+    - ValueError: If post_type or post_id is invalid
+    """
+    if not post_id or not post_type:
+        raise ValueError("post_id and post_type must not be empty")
+        
+    connection = get_db_connection()
+    if not connection:
+        print("Failed to establish database connection")
+        return None
+        
+    cursor = connection.cursor(dictionary=True)
+    try:
+        allowed_post_types = ['articles', 'guides', 'tutorials'] 
+        if post_type not in allowed_post_types:
+            raise ValueError(f"Invalid post_type. Must be one of {allowed_post_types}")
+            
+        query = f"""
+        SELECT thumbnail FROM {post_type}
+        WHERE id = %s
+        """
+        cursor.execute(query, (post_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return None
+            
+        return result['thumbnail']
+        
+    except Error as err:
+        print(f"Database error: {err}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None
+    finally:
+        cursor.close()
+        connection.close()
+
+def get_post_mysql(post_type, offset_upper=50, offset_lower=0):
+    """
+    Fetch posts from the database. If no offsets are provided, it will return data from index 50 to 0.
+    If offsets are given, it will return data based on those limits.
+
+    Parameters:
+    - post_type: str (e.g., 'articles', 'guides', 'tutorials')
+    - offset_upper: int (optional) - the upper bound for the data range
+    - offset_lower: int (optional) - the lower bound for the data range
+
+    Returns:
+    - list: A list of tuples representing the rows fetched from the database
+    """
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    if offset_upper is None and offset_lower is None:
+        offset_upper = 50
+        offset_lower = 0
+
+    query = f"SELECT * FROM {post_type} LIMIT %s OFFSET %s"
+    
+    limit = offset_upper - offset_lower
+    offset = offset_lower
+
+    try:
+        cursor.execute(query, (limit, offset))
+        result = cursor.fetchall()
+        return result
+
+    except mysql.connector.Error as err:
+        print(f"Error fetching posts: {err}")
+        return []
+    
     finally:
         cursor.close()
         connection.close()

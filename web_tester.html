@@ -64,11 +64,11 @@
             formData.append('text_data', JSON.stringify(textData));
             
             formData.append('thumbnail', document.getElementById('thumbnail').files[0]);
-            formData.append('video', document.getElementById('banner').files[0]);
+            formData.append('banner', document.getElementById('banner').files[0]);
             formData.append('markdown', document.getElementById('markdown').files[0]);
 
             try {
-                const response = await fetch('http://127.0.0.1:8000/upload-post/tutorials', {
+                const response = await fetch('http://127.0.0.1:8000/upload-post/guides', {
                     method: 'POST',
                     body: formData
                 });
